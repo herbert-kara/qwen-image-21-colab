@@ -37,6 +37,9 @@ Set `Runtime → Change runtime type → T4 GPU`, then `Runtime → Run all`.
 - Text rendered inside the image: two chained `KSamplerAdvanced` (first at cfg 1.0, second at
   cfg 3.0 from step ~15 to 25) exactly as described in the pottokao model card.
 - Out of memory on T4: add `--lowvram` to the command in cell 4.
+- Cell 4 renders ComfyUI with `google.colab.output.serve_kernel_port_as_iframe(8188, height=900)`
+  in the cell output (`serve_kernel_port_as_window` is deprecated by Colab itself and its
+  `https://localhost:8188/` link does not resolve).
 - Cell 4 opens ComfyUI with `google.colab.output.serve_kernel_port_as_window(8188)` (a new tab
   Colab authenticates itself, token in the URL) plus the same thing as an iframe in the notebook.
   Never hand-copy a `*.prod.r.colab.dev` URL: it is bound to the Colab session cookie and Google
