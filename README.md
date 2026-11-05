@@ -38,6 +38,19 @@ Set `Runtime → Change runtime type → T4 GPU`, then `Runtime → Run all`.
   cfg 3.0 from step ~15 to 25) exactly as described in the pottokao model card.
 - Out of memory on T4: run cell 4 with `--lowvram`.
 
+## If Colab refuses a GPU (`Cannot connect to GPU backend — usage limits`)
+
+That message is account-level free-tier quota, not a bug you can code around. In order of cheapness:
+
+1. **Switch Google account** in Colab (top-right avatar) — a fresh account has a fresh quota. Instant.
+2. **Wait** — the free quota is dynamic and typically frees up within a few hours to ~24 h.
+3. **Pay-as-you-go compute units / Colab Pro** — the only guaranteed path.
+
+**Use the waiting time:** the notebook's cell 3 stages the 11 GB of weights into **Google Drive**
+(`MyDrive/qwen21-models`) and symlinks them into ComfyUI, so it runs on a **CPU runtime** too
+(CPU runtime has no quota). Once a GPU window opens, only cell 1 and cell 4 are needed — up in
+about 2 minutes instead of 20. Drive has 15 GB free; the cache is ~11 GB.
+
 ## Notes / caveats
 
 - Qwen-Image-2.1 weights are under the **Qwen research license** — commercial use needs a separate
