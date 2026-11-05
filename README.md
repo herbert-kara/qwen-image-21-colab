@@ -37,9 +37,14 @@ Set `Runtime → Change runtime type → T4 GPU`, then `Runtime → Run all`.
 - Text rendered inside the image: two chained `KSamplerAdvanced` (first at cfg 1.0, second at
   cfg 3.0 from step ~15 to 25) exactly as described in the pottokao model card.
 - Out of memory on T4: add `--lowvram` to the command in cell 4.
-- Cell 4 prints the GUI URL from Colab's own proxy (`google.colab.kernel.proxyPort`), so no
-  gradio/cloudflared tunnel is involved. If that URL 404s, add `--share` to the same command
-  and take the `gradio.live` link from the cell output instead.
+- Cell 4 prints the GUI URL from Colab's own proxy (`google.colab.kernel.proxyPort`), and it prints it
+  **only after** ComfyUI actually answers on `127.0.0.1:8188`. Google returns `404` on that host while
+  nothing listens — a blank/404 page there means ComfyUI crashed or is still booting, not a network
+  problem. The URL dies with the session, so copy it from the current cell output.
+- `Port 8188 is already in use`: cell 4 reuses a ComfyUI that is already running, and kills a stale one
+  first, so re-running it is safe.
+- If the Colab proxy URL still fails, run cell 5 — a cloudflared quick tunnel started **inside Colab**
+  (`<...>.trycloudflare.com`), or add `--share` to cell 4 and take the `gradio.live` link.
 
 ## If Colab refuses a GPU (`Cannot connect to GPU backend — usage limits`)
 
