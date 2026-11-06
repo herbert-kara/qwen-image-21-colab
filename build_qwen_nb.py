@@ -97,20 +97,21 @@ for repo, fn, sub in jobs:
 print("done")
 """),
 code(r"""
-# ۴) اجرای ComfyUI + لینک — اگر از قبل بالا باشد دوباره استارت نمی‌زند
-import subprocess, sys, threading, time, socket, urllib.request, re
+# ۴) اجرای ComfyUI + لینک ثابت (تونل نامدار Cloudflare)
+import subprocess, sys, threading, time, socket, urllib.request, os
 
-def up():
-    try:
-        urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=3).close(); return True
-    except Exception:
-        return False
+URL = "https://qwen21.bawbaw.dpdns.org"
+TUN = "eyJhIjoiMGYxMzE2NWM4NGQzNGM2ZGI4M2NlYjlmZWU3MjQzMWIiLCJ0IjoiMTNkODM3ZjMtNzg0Ni00M2I2LWE4YjktNmNmZWY3ZTY0OWEzIiwicyI6Ilp3dzFISEd0YUw0S3M0V2tVVWlmNFlBUXlyMTlWTzZTM0VsS0htQWdLK3k4aVA4R0NkTmV6WkJrZlVPbWV3S1dXbnNZVGZZb0I1c2pJNnJ2Nm1ES213PT0ifQ=="
+
+def ok(u, to=4):
+    try: urllib.request.urlopen(u, timeout=to).close(); return True
+    except Exception: return False
+
+def up(): return ok("http://127.0.0.1:8188/system_stats", 3)
 
 if not up():
-    # هر نسخهٔ ComfyUI را می‌گیرد (با یا بدون --share)؛ الگوی [m] تا خود pkill را نکشد
-    subprocess.run('pkill -f "[m]ain.py" || true', shell=True)
-
-    def busy():                       # تا ۱۰ ثانیه صبر می‌کنیم پورت آزاد شود
+    subprocess.run('pkill -f "[m]ain.py" || true', shell=True)   # الگوی [m] تا pkill خودش را نکشد
+    def busy():
         s = socket.socket(); s.settimeout(1)
         try: return s.connect_ex(("127.0.0.1", 8188)) == 0
         finally: s.close()
@@ -119,43 +120,51 @@ if not up():
         time.sleep(1)
     if busy():
         subprocess.run("fuser -k 8188/tcp || true", shell=True); time.sleep(3)
-
-    proc = subprocess.Popen([sys.executable, "main.py", "--port", "8188"],
-                            cwd="/content/ComfyUI", stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, bufsize=1)
-    def tail(): [print(l, end="", flush=True) for l in proc.stdout]
-    threading.Thread(target=tail, daemon=True).start()
-    for _ in range(40):       # ~۲ دقیقه: ایمپورت torch و نودها روی T4 اول‌بار کند است
+    p = subprocess.Popen([sys.executable, "main.py", "--port", "8188"], cwd="/content/ComfyUI",
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    threading.Thread(target=lambda: [print(l, end="", flush=True) for l in p.stdout], daemon=True).start()
+    for _ in range(40):          # ~۲ دقیقه: ایمپورت torch و نودها روی T4 اول‌بار کند است
         if up(): break
         time.sleep(3)
 
-if up():
-    print("\n>>> ComfyUI روی 127.0.0.1:8188 آماده است. حالا تونل عمومی:", flush=True)
-    tun = subprocess.Popen(
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-        "-o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -R 80:localhost:8188 serveo.net",
-        shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    found = []
-    def pump():
-        for l in tun.stdout:
-            print(l, end="", flush=True)
-            m = re.search(r"https://[a-z0-9.-]+serveousercontent\.com", l)
-            if m: found.append(m.group(0))
-    threading.Thread(target=pump, daemon=True).start()
-    for _ in range(25):          # ~۵۰ ثانیه تا serveo آدرس را چاپ کند
-        if found: break
-        time.sleep(2)
-    print("\n>>>>>> لینک ComfyUI:", found[0] if found else "نیامد — لاگِ بالا را بخوان", flush=True)
+if not up():
+    print("!! ComfyUI روی ۸۱۸۸ بالا نیامد — لاگ بالا را بخوان", flush=True)
 else:
-    print("\n!! سرور روی ۸۱۸۸ جواب نداد — ارور در لاگِ بالاست.", flush=True)
+    if not os.path.exists("/usr/local/bin/cloudflared"):
+        subprocess.run("curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/"
+                       "cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared",
+                       shell=True)
+    subprocess.run('pkill -f "cloudflared tunnel" || true', shell=True); time.sleep(2)
+    # HTTP/2 + IPv4 اجباری: مسیر ISP→لبهٔ Cloudflare با QUIC روی assetهای بزرگ گیر می‌کرد (UI روی لوگو می‌ماند)
+    subprocess.Popen("/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 "
+                     f"--url http://localhost:8188 run --token {TUN}",
+                     shell=True, stdout=open("/content/cloudflared.log", "a"), stderr=subprocess.STDOUT)
+    for _ in range(30):          # ~۲ دقیقه تا تونل ۲۰۰ بدهد
+        if ok(URL + "/system_stats", 6): break
+        time.sleep(4)
+    if ok(URL + "/system_stats", 6):
+        print("\n>>>>>> لینک ComfyUI:", URL, flush=True)
+    else:
+        print("\n!! تونل جواب نداد — /content/cloudflared.log", flush=True)
+"""),
+
+code(r"""
+# ۵) ورک‌فلوی آماده در سایدبار Workflows
+import os, urllib.request
+d = "/content/ComfyUI/user/default/workflows"; os.makedirs(d, exist_ok=True)
+urllib.request.urlretrieve(
+    "https://raw.githubusercontent.com/herbert-kara/qwen-image-21-colab/main/workflows/qwen21-t2i.json",
+    d + "/qwen21-t2i.json")
+print("نصب شد -> ComfyUI → Workflows → qwen21-t2i")
 """),
 md(r"""
-### چرا serveo و نه پروکسی/iframe کولب
+### چرا تونل نامدار Cloudflare
 
-روی همین شبکه اندازه‌گیری شد: `*.colab.googleusercontent.com` (میزبان iframe) تایم‌اوت می‌دهد، لینک `*.prod.r.colab.dev`
-خطای «You don't have authorization» می‌دهد و `*.trycloudflare.com` اصلاً DNS حل نمی‌کند — ولی `*.serveousercontent.com`
-باز می‌شود (تست‌شده: ۲۰۰ از تونل). پس لینک از سل ۴، تونل serveo است.
+`serveo` و `localhost.run` فایل‌های JS را با HTML صفحهٔ interstitial عوض می‌کردند (UI روی لوگو می‌ماند) و
+`*.trycloudflare.com` روی این شبکه DNS نمی‌شد. تونل نامدار روی دامنهٔ خودمان (`qwen21.bawbaw.dpdns.org`) همهٔ
+assetها را با `content-type` درست می‌دهد؛ فقط باید cloudflared با `--protocol http2 --edge-ip-version 4` اجرا شود.
 """),
+
 md(r"""
 ## تنظیمات سَمپلر (در ComfyUI)
 
