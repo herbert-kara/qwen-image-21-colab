@@ -98,7 +98,9 @@ print("done")
 """),
 code(r"""
 # ۴) اجرای ComfyUI + لینک ثابت (تونل نامدار Cloudflare)
-import subprocess, sys, threading, time, socket, urllib.request, os
+# پروسهها detached بالا میآیند و در حلقه خودشان ریاستارت میشوند؛ سل بلوکه نمیشود.
+# (سلِ بلوکهٔ قبلی باعث دیسکانکت میشد و با مرگ سل، سرور و تونل هم میمردند.)
+import subprocess, time, urllib.request, os
 
 URL = "https://qwen21.bawbaw.dpdns.org"
 TUN = "eyJhIjoiMGYxMzE2NWM4NGQzNGM2ZGI4M2NlYjlmZWU3MjQzMWIiLCJ0IjoiMTNkODM3ZjMtNzg0Ni00M2I2LWE4YjktNmNmZWY3ZTY0OWEzIiwicyI6Ilp3dzFISEd0YUw0S3M0V2tVVWlmNFlBUXlyMTlWTzZTM0VsS0htQWdLK3k4aVA4R0NkTmV6WkJrZlVPbWV3S1dXbnNZVGZZb0I1c2pJNnJ2Nm1ES213PT0ifQ=="
@@ -107,45 +109,29 @@ def ok(u, to=4):
     try: urllib.request.urlopen(u, timeout=to).close(); return True
     except Exception: return False
 
-def up(): return ok("http://127.0.0.1:8188/system_stats", 3)
+if not os.path.exists("/usr/local/bin/cloudflared"):
+    subprocess.run("curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/"
+                   "cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared",
+                   shell=True)
+subprocess.run('pkill -f "[m]ain.py" || true; pkill -f "[c]loudflared" || true; fuser -k 8188/tcp || true',
+               shell=True)
+time.sleep(3)
 
-if not up():
-    subprocess.run('pkill -f "[m]ain.py" || true', shell=True)   # الگوی [m] تا pkill خودش را نکشد
-    def busy():
-        s = socket.socket(); s.settimeout(1)
-        try: return s.connect_ex(("127.0.0.1", 8188)) == 0
-        finally: s.close()
-    for _ in range(10):
-        if not busy(): break
-        time.sleep(1)
-    if busy():
-        subprocess.run("fuser -k 8188/tcp || true", shell=True); time.sleep(3)
-    p = subprocess.Popen([sys.executable, "main.py", "--port", "8188"], cwd="/content/ComfyUI",
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-    threading.Thread(target=lambda: [print(l, end="", flush=True) for l in p.stdout], daemon=True).start()
-    for _ in range(40):          # ~۲ دقیقه: ایمپورت torch و نودها روی T4 اول‌بار کند است
-        if up(): break
-        time.sleep(3)
+# HTTP/2 + IPv4 اجباری: مسیر ISP→لبهٔ Cloudflare با QUIC روی assetهای بزرگ گیر میکرد (UI روی لوگو میماند)
+comfy = 'cd /content/ComfyUI && while true; do python main.py --port 8188; sleep 3; done'
+cfl = (f'while true; do /usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 '
+       f'--edge-ip-version 4 --url http://localhost:8188 run --token {TUN}; sleep 5; done')
+for cmd, log in ((comfy, "/content/comfy.log"), (cfl, "/content/cloudflared.log")):
+    subprocess.Popen(["setsid", "bash", "-lc", cmd], stdout=open(log, "a"), stderr=subprocess.STDOUT)
+    time.sleep(2)
 
-if not up():
-    print("!! ComfyUI روی ۸۱۸۸ بالا نیامد — لاگ بالا را بخوان", flush=True)
+for _ in range(60):          # ~۳ دقیقه: ایمپورت torch روی T4 اولبار کند است + هندشیک تونل
+    if ok(URL + "/system_stats", 8): break
+    time.sleep(3)
+if ok(URL + "/system_stats", 8):
+    print("\n>>>>>> لینک ComfyUI:", URL, flush=True)
 else:
-    if not os.path.exists("/usr/local/bin/cloudflared"):
-        subprocess.run("curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/"
-                       "cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared",
-                       shell=True)
-    subprocess.run('pkill -f "cloudflared tunnel" || true', shell=True); time.sleep(2)
-    # HTTP/2 + IPv4 اجباری: مسیر ISP→لبهٔ Cloudflare با QUIC روی assetهای بزرگ گیر می‌کرد (UI روی لوگو می‌ماند)
-    subprocess.Popen("/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 "
-                     f"--url http://localhost:8188 run --token {TUN}",
-                     shell=True, stdout=open("/content/cloudflared.log", "a"), stderr=subprocess.STDOUT)
-    for _ in range(30):          # ~۲ دقیقه تا تونل ۲۰۰ بدهد
-        if ok(URL + "/system_stats", 6): break
-        time.sleep(4)
-    if ok(URL + "/system_stats", 6):
-        print("\n>>>>>> لینک ComfyUI:", URL, flush=True)
-    else:
-        print("\n!! تونل جواب نداد — /content/cloudflared.log", flush=True)
+    print("\n!! آماده نشد — tail /content/comfy.log /content/cloudflared.log", flush=True)
 """),
 
 code(r"""
